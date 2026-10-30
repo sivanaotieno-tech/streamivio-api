@@ -40,9 +40,10 @@ def load_catalog() -> list[dict[str, Any]]:
     try:
         with CATALOG_PATH.open("r", encoding="utf-8") as file:
             data = json.load(file)
-        if not isinstance(data, list):
+        rows = data.get("titles", []) if isinstance(data, dict) else data
+        if not isinstance(rows, list):
             return []
-        return [normalize_title(item) for item in data if isinstance(item, dict)]
+        return [normalize_title(item) for item in rows if isinstance(item, dict) and item.get("published", True)]
     except (OSError, json.JSONDecodeError):
         return []
 
@@ -65,9 +66,18 @@ def normalize_title(item: dict[str, Any]) -> dict[str, Any]:
         "title": title,
         "type": media_type,
         "year": item.get("year"),
+        "rating": item.get("rating"),
         "overview": str(item.get("overview") or item.get("description") or ""),
         "poster_url": item.get("poster_url") or item.get("poster"),
         "genres": genres,
+        "country": item.get("country") if isinstance(item.get("country"), list) else ([item.get("country")] if item.get("country") else []),
+        "age_rating": item.get("age_rating") or item.get("ageRating"),
+        "original_title": item.get("original_title") or title,
+        "alternate_titles": item.get("alternate_titles") or item.get("aliases") or [],
+        "keywords": item.get("keywords") or item.get("tags") or [],
+        "cast": item.get("cast") or item.get("actors") or [],
+        "directors": item.get("directors") or [],
+        "playback_available": bool(item.get("video_url")),
         "category": item.get("category"),
         "imdb_id": item.get("imdb_id"),
         "tmdb_id": item.get("tmdb_id"),
@@ -168,6 +178,8 @@ async def catalog(
     if q:
         items = [item for item in items if search_score(item, q) > 0]
         items.sort(key=lambda item: search_score(item, q), reverse=True)
+    elif sort == "rating":
+        items.sort(key=lambda item: float(item.get("rating") or 0), reverse=True)
     elif sort == "title":
         items.sort(key=lambda item: item["title"].casefold())
     elif sort == "year":
@@ -221,6 +233,8 @@ async def title_details(title_id: str) -> dict[str, Any]:
 @app.get("/featured")
 async def featured(limit: int = Query(default=20, ge=1, le=100)) -> dict[str, Any]:
     items = [item for item in load_catalog() if item["featured"]]
+    if not items:
+        items = sorted(load_catalog(), key=lambda item: float(item.get("rating") or 0), reverse=True)
     return {"results": items[:limit], "total": len(items)}
 
 
