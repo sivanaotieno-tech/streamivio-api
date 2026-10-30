@@ -50,7 +50,10 @@ def load_catalog() -> list[dict[str, Any]]:
 def normalize_title(item: dict[str, Any]) -> dict[str, Any]:
     title = str(item.get("title") or item.get("name") or "").strip()
     raw_type = str(item.get("type") or item.get("media_type") or "movie").lower()
-    media_type = "tv" if raw_type in {"tv", "show", "series", "tvshow", "tv_show"} else "movie"
+    aliases = {"show": "tv", "series": "tv", "tvshow": "tv", "tv_show": "tv", "documentaries": "documentary"}
+    media_type = aliases.get(raw_type, raw_type)
+    if media_type not in {"movie", "tv", "anime", "documentary", "kids", "reality"}:
+        media_type = "movie"
     genres = item.get("genres") or []
     if isinstance(genres, str):
         genres = [part.strip() for part in genres.split(",") if part.strip()]
@@ -141,9 +144,13 @@ async def health() -> dict[str, Any]:
 
 @app.get("/catalog")
 async def catalog(
-    type: str | None = Query(default=None, pattern="^(movie|tv)$"),
+    q: str | None = Query(default=None, min_length=1, max_length=120),
+    type: str | None = Query(default=None, pattern="^(movie|tv|anime|documentary|kids|reality)$"),
     category: str | None = None,
     genre: str | None = None,
+    country: str | None = None,
+    year: str | None = Query(default=None, pattern="^\\d{4}$"),
+    sort: str = Query(default="relevance", pattern="^(relevance|rating|year|title)$"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, Any]:
@@ -154,6 +161,17 @@ async def catalog(
         items = [item for item in items if str(item.get("category") or "").casefold() == category.casefold()]
     if genre:
         items = [item for item in items if any(genre.casefold() == str(g).casefold() for g in item["genres"])]
+    if country:
+        items = [item for item in items if any(country.casefold() in str(c).casefold() for c in (item.get("country") or []))]
+    if year:
+        items = [item for item in items if str(item.get("year") or "")[:4] == year]
+    if q:
+        items = [item for item in items if search_score(item, q) > 0]
+        items.sort(key=lambda item: search_score(item, q), reverse=True)
+    elif sort == "title":
+        items.sort(key=lambda item: item["title"].casefold())
+    elif sort == "year":
+        items.sort(key=lambda item: int(str(item.get("year") or "0")[:4]) if str(item.get("year") or "")[:4].isdigit() else 0, reverse=True)
     return {"results": items[offset:offset + limit], "total": len(items), "limit": limit, "offset": offset}
 
 
