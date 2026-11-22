@@ -104,6 +104,14 @@ async def media_providers():
                 "upstream_data_license": "varies_by_provider",
             },
             {
+                "id": "anilist",
+                "role": "anime_metadata",
+                "configured": bool(_base_url("STREAMX_API_BASE")),
+                "enabled": _streamx_enabled() and os.getenv("ANILIST_USAGE_APPROVED", "").lower() == "true",
+                "status": "enabled" if (_streamx_enabled() and os.getenv("ANILIST_USAGE_APPROVED", "").lower() == "true") else "disabled_until_anilist_terms_are_cleared",
+                "source": "https://docs.anilist.co/guide/terms-of-use",
+            },
+            {
                 "id": "hovod",
                 "role": "authorised_video_delivery",
                 "configured": bool(_base_url("HOVOD_API_URL") and os.getenv("HOVOD_ALLOWED_MEDIA_HOSTS", "").strip()),
@@ -124,6 +132,8 @@ async def media_search(
     limit: int = Query(default=30, ge=1, le=100),
 ):
     if _streamx_enabled():
+        if kind == "anime" and os.getenv("ANILIST_USAGE_APPROVED", "").lower() != "true":
+            raise HTTPException(status_code=503, detail="AniList is disabled until its API terms and Streamivio's service model are cleared.")
         base = _base_url("STREAMX_API_BASE")
         upstream_type = "series" if kind in {"series", "anime", "documentary"} else "movie"
         try:
@@ -168,7 +178,7 @@ async def media_metadata(kind: str, content_id: str):
     base = _base_url("STREAMX_API_BASE")
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
-            response = await client.get(f"{base}/meta/{kind}/{content_id}", headers={"Accept": "application/json"})
+            response = await client.get(f"{base}/meta/{kind}/{content_id}", params={"enrich": "0"}, headers={"Accept": "application/json"})
             response.raise_for_status()
             return response.json()
     except (httpx.HTTPError, ValueError) as exc:
