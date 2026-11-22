@@ -286,5 +286,5 @@ async def genres_endpoint():
     return {"results": sorted({genre for row in get_catalog() for genre in row.get("genres", [])})}
 
 
-# Streamivio Media Engine routes (control plane; video delivery stays on Jellyfin).
+# Standalone Streamivio Media Engine routes (metadata and playback coordination only).
 app.include_router(media_engine_router)
