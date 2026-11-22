@@ -1,0 +1,15 @@
+services:
+  hovod:
+    image: synapsr/hovod:latest
+    container_name: streamivio-hovod
+    restart: unless-stopped
+    stop_grace_period: 60s
+    env_file:
+      - .env.hovod
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - hovod-data:/data
+
+volumes:
+  hovod-data:
