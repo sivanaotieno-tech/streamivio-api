@@ -30,7 +30,8 @@ Set these server-side variables in the API deployment:
 - `HOVOD_API_URL`: HTTPS origin of the Hovod service, e.g. `https://media-api.example.com`.
 - `HOVOD_ALLOWED_MEDIA_HOSTS`: comma-separated hostnames allowed for HLS manifests, e.g. `media-api.example.com,media-assets.example.com`. Hostnames only; no schemes or paths.
 - `STREAMX_API_BASE`: your self-hosted StreamX API origin. Leave unset until deployed.
-- `STREAMX_UPSTREAM_TERMS_APPROVED`: set to `true` only after reviewing the upstream terms and rights for each data source you enable. The default is disabled.
+- `STREAMX_UPSTREAM_TERMS_APPROVED`: set to `true` only after reviewing the Cinemeta/MetaHub upstream terms and rights for the intended use. The default is disabled.
+- `ANILIST_USAGE_APPROVED`: separate opt-in for AniList anime search. Keep false unless the AniList API terms and Streamivio's service model have been cleared.
 
 The frontend playback route also reads `STREAMIVIO_API_URL` (or `NEXT_PUBLIC_STREAMIVIO_API_URL`) to call the Streamivio API. Prefer the server-only `STREAMIVIO_API_URL` variable.
 
