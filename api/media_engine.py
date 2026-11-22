@@ -129,9 +129,10 @@ async def media_search(
         upstream_type = "series" if kind in {"series", "anime", "documentary"} else "movie"
         try:
             async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
+                endpoint = f"{base}/anime/search" if kind == "anime" else f"{base}/search"
                 response = await client.get(
-                    f"{base}/search",
-                    params={"q": q, "type": upstream_type},
+                    endpoint,
+                    params={"q": q} if kind == "anime" else {"q": q, "type": upstream_type},
                     headers={"Accept": "application/json"},
                 )
                 response.raise_for_status()
