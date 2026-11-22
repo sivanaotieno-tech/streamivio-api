@@ -2,7 +2,7 @@ name: Streamivio API CI
 
 on:
   push:
-    branches: ["main", "feature/standalone-media-engine"]
+    branches: ["main", "feature/standalone-media-engine", "feature/no-key-catalogue-playback"]
   pull_request:
     branches: ["main"]
   workflow_dispatch:

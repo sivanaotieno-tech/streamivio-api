@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CATALOG_PATH = ROOT / "catalog.json"
 
 from api.media_engine import router as media_engine_router
+from api.open_sources import router as open_sources_router
 
 app = FastAPI(
     title="Streamivio API",
@@ -296,3 +297,4 @@ async def genres_endpoint():
 
 # Standalone Streamivio Media Engine routes (metadata and playback coordination only).
 app.include_router(media_engine_router)
+app.include_router(open_sources_router)

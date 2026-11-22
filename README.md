@@ -82,3 +82,8 @@ Frontend:
 - `STREAMIVIO_API_URL` (server-only preferred; fallback `NEXT_PUBLIC_STREAMIVIO_API_URL`)
 
 Never commit credentials, storage keys, signed URLs, or private provider tokens.
+
+
+## No-key discovery and playback
+
+See [NO_KEY_CATALOGUE.md](NO_KEY_CATALOGUE.md) for the new public metadata and rights-filtered playback endpoints under `/open/*`. They require no API keys and do not alter existing `/catalog`, `/media/*`, or rights-gated Hovod routes.
