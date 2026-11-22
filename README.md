@@ -42,7 +42,7 @@ Open `http://127.0.0.1:8000/docs`.
 - `GET /media/meta/{kind}/{content_id}`
 - `GET /media/playback/{title_id}`
 
-The StreamX metadata adapter requires both `STREAMX_API_BASE` and `STREAMX_UPSTREAM_TERMS_APPROVED=true`. Do not enable it until each upstream source is cleared for the intended use. StreamX's source code is MIT; upstream data and artwork retain their own terms and rights.
+The StreamX metadata adapter requires both `STREAMX_API_BASE` and `STREAMX_UPSTREAM_TERMS_APPROVED=true`. Do not enable it until each upstream source is cleared for the intended use. AniList additionally requires `ANILIST_USAGE_APPROVED=true`; keep it disabled until its specific API restrictions are cleared. StreamX's source code is MIT; upstream data and artwork retain their own terms and rights.
 
 The Hovod adapter requires `HOVOD_API_URL` and `HOVOD_ALLOWED_MEDIA_HOSTS`. Hovod playback IDs are public/unlisted, not access-controlled. This integration is only for content cleared for public playback; it is not suitable for subscriber-only/private content.
 
