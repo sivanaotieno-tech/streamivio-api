@@ -1,6 +1,6 @@
 services:
   hovod:
-    image: synapsr/hovod:latest
+    image: synapsr/hovod:1.0.0
     container_name: streamivio-hovod
     restart: unless-stopped
     stop_grace_period: 60s
