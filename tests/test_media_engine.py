@@ -42,7 +42,7 @@ class StreamivioMediaEngineTests(unittest.IsolatedAsyncioTestCase):
             {"id": "film-1", "title": "Planet Earth", "type": "movie"},
             {"id": "doc-1", "title": "Planet Ocean", "type": "documentary"},
         ])
-        response = await media_engine.media_search(q="planet", kind="documentary")
+        response = await media_engine.media_search(q="planet", kind="documentary", limit=30)
         self.assertEqual([row["id"] for row in response["results"]], ["doc-1"])
 
     async def test_anilist_is_not_enabled_without_explicit_approval(self):
@@ -53,7 +53,7 @@ class StreamivioMediaEngineTests(unittest.IsolatedAsyncioTestCase):
             "ANILIST_USAGE_APPROVED": "false",
         }):
             with self.assertRaises(HTTPException) as error:
-                await media_engine.media_search(q="one piece", kind="anime")
+                await media_engine.media_search(q="one piece", kind="anime", limit=30)
         self.assertEqual(error.exception.status_code, 503)
 
     async def test_playback_requires_rights_record(self):
