@@ -267,6 +267,8 @@ async def playback_endpoint(title_id: str):
         raise HTTPException(status_code=404, detail="Title not found")
     if row.get("imdb_id") or row.get("tmdb_id"):
         return {"resolved": True, "available": False, "imdb_id": row.get("imdb_id"), "tmdb_id": row.get("tmdb_id"), "title": row["title"]}
+    if os.getenv("IMDB_LOOKUP_APPROVED", "").lower() != "true":
+        raise HTTPException(status_code=503, detail="IMDb suggestion lookup is disabled until its terms and use are approved.")
     resolved = await resolve_imdb_id(row["title"], str(row.get("year") or "") or None, row["type"])
     if not resolved:
         raise HTTPException(status_code=404, detail="No exact IMDb match found; add a verified imdb_id or tmdb_id to the catalog.")
