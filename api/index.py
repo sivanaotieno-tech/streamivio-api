@@ -13,6 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG_PATH = ROOT / "catalog.json"
 
+from api.media_engine import router as media_engine_router
+
 app = FastAPI(
     title="Streamivio API",
     description="Search and metadata API for the Streamivio web application.",
@@ -282,3 +284,7 @@ async def categories_endpoint():
 @app.get("/genres")
 async def genres_endpoint():
     return {"results": sorted({genre for row in get_catalog() for genre in row.get("genres", [])})}
+
+
+# Streamivio Media Engine routes (control plane; video delivery stays on Jellyfin).
+app.include_router(media_engine_router)
