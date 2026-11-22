@@ -59,7 +59,7 @@ def _entity_id(claim: dict) -> str | None:
 def _entity_year(claims: dict):
     value = _value(claims, "P577")
     if isinstance(value, dict):
-        match = re.match(r"^[+-]?(\\d{4})", str(value.get("time", "")))
+        match = re.match(r"^[+-]?(\d{4})", str(value.get("time", "")))
         return int(match.group(1)) if match else None
     return None
 
