@@ -33,6 +33,10 @@ class NoKeyCatalogueTests(unittest.TestCase):
         self.assertIn("commons.wikimedia.org", result["poster_url"])
         self.assertIn("individual Commons file page", result["artwork_license_note"])
 
+    def test_public_domain_license_is_normalized_exactly(self):
+        self.assertIn("http://creativecommons.org/publicdomain/mark/1.0/", open_sources.ALLOWED_LICENSES)
+        self.assertNotIn("http://creativecommons.org/licenses/by-nc/4.0/", open_sources.ALLOWED_LICENSES)
+
     def test_only_cc0_and_public_domain_mark_are_allowlisted(self):
         self.assertIn("https://creativecommons.org/publicdomain/zero/1.0/", open_sources.ALLOWED_LICENSES)
         self.assertNotIn("https://creativecommons.org/licenses/by-nc/4.0/", open_sources.ALLOWED_LICENSES)
