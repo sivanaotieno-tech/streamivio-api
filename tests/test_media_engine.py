@@ -47,6 +47,12 @@ class StreamivioMediaEngineTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual([row["id"] for row in response.json()["results"]], ["doc-1"])
 
+    def test_anilist_is_not_enabled_by_default(self):
+        self.write_catalog([])
+        response = self.client.get("/media/search?q=one+piece&kind=anime")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["provider"], "streamivio-catalog")
+
     def test_playback_requires_rights_record(self):
         self.write_catalog([{"id": "sample", "title": "Sample", "playback": {"hovod_playback_id": "Abcdefgh1234"}}])
         response = self.client.get("/media/playback/sample")
