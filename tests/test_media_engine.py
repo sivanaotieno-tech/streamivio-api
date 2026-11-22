@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from fastapi import HTTPException
 import api.media_engine as media_engine
+import api.index as api_index
 
 
 class StreamivioMediaEngineTests(unittest.IsolatedAsyncioTestCase):
@@ -54,6 +55,12 @@ class StreamivioMediaEngineTests(unittest.IsolatedAsyncioTestCase):
         }):
             with self.assertRaises(HTTPException) as error:
                 await media_engine.media_search(q="one piece", kind="anime", limit=30)
+        self.assertEqual(error.exception.status_code, 503)
+
+    async def test_imdb_suggestion_lookup_is_disabled_without_approval(self):
+        with patch.object(api_index, "get_catalog", return_value=[{"id": "sample", "title": "Sample", "type": "movie"}]):
+            with self.assertRaises(HTTPException) as error:
+                await api_index.playback_endpoint("sample")
         self.assertEqual(error.exception.status_code, 503)
 
     async def test_playback_requires_rights_record(self):
