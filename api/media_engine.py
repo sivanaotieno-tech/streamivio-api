@@ -84,7 +84,6 @@ async def media_health():
     return {
         "service": "streamivio-media-engine",
         "status": "ok",
-        "jellyfin": False,
         "metadata": "enabled" if streamx_enabled else ("needs_terms_approval" if streamx_configured else "not_configured"),
         "playback": "configured" if hovod_configured else "not_configured",
     }
@@ -145,12 +144,17 @@ async def media_search(
             raise HTTPException(status_code=502, detail="Metadata provider is temporarily unavailable") from exc
 
     query = q.casefold().strip()
+    kind_types = {
+        "movie": {"movie"},
+        "series": {"tv", "series"},
+        "anime": {"anime"},
+        "documentary": {"documentary"},
+    }[kind]
     rows = [
         row for row in _read_catalog()
         if row.get("published", True)
         and query in str(row.get("title", "")).casefold()
-        and (kind == "movie" and str(row.get("type", "movie")) == "movie"
-             or kind != "movie" and str(row.get("type", "")).lower() in {"tv", "series", "anime", "documentary"})
+        and str(row.get("type", "movie")).lower() in kind_types
     ]
     return {"results": rows[:limit], "total": len(rows), "provider": "streamivio-catalog", "metadata_only": True}
 
