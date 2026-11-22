@@ -37,9 +37,11 @@ def client_headers(token: str | None = None) -> dict[str, str]:
 
 async def jf(method: str, path: str, token: str | None = None, **kwargs: Any) -> Any:
     url = f"{jellyfin_url()}{path}"
+    supplied_headers = kwargs.pop("headers", {})
+    headers = {**client_headers(token), **supplied_headers}
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
-            response = await client.request(method, url, headers=client_headers(token), **kwargs)
+            response = await client.request(method, url, headers=headers, **kwargs)
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"Jellyfin connection failed: {type(exc).__name__}") from exc
     if response.status_code == 401:
