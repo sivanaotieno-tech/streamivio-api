@@ -17,7 +17,7 @@ mkdir media-server\config, media-server\cache, media-server\media
 docker compose -f media-server/docker-compose.yml up -d
 ```
 
-Open `http://localhost:8096` and complete the Jellyfin first-run wizard. Create an administrator, then add libraries pointing at `/media` (Movies, Shows, Anime, Documentaries, etc.). The compose file mounts media read-only to prevent accidental edits/deletions from Jellyfin.
+Open `http://localhost:8096` and complete the Jellyfin first-run wizard. Create an administrator, then add libraries pointing at `/media` (Movies, Shows, Anime, Documentaries, etc.). The compose file mounts media read-only to prevent accidental edits/deletions from Jellyfin. To avoid filling your system drive, set `STREAMIVIO_MEDIA_PATH` in a root-level `.env` file to an existing external-drive or NAS folder (for example `STREAMIVIO_MEDIA_PATH=E:/Media` on Windows), then start Compose again. No media needs to be copied into the repository.
 
 On Windows Docker Desktop, the example `user: "1000:1000"` may not match your file permissions. If the container cannot read your media, remove the `user` line and restart the container. Do not expose port 8096 directly to the public internet; use HTTPS through a reverse proxy or a private VPN.
 
