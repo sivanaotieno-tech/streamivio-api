@@ -131,7 +131,7 @@ async def media_search(
     kind: str = Query(default="movie", pattern="^(movie|series|anime|documentary)$"),
     limit: int = Query(default=30, ge=1, le=100),
 ):
-    if _streamx_enabled():
+    if _streamx_enabled() and kind != "documentary":
         if kind == "anime" and os.getenv("ANILIST_USAGE_APPROVED", "").lower() != "true":
             raise HTTPException(status_code=503, detail="AniList is disabled until its API terms and Streamivio's service model are cleared.")
         base = _base_url("STREAMX_API_BASE")
