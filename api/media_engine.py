@@ -1,248 +1,248 @@
-"""Streamivio Media Engine: secure Jellyfin control-plane and metadata adapters.
+"""Standalone Streamivio media integrations.
 
-The API coordinates sessions and metadata. Video bytes/HLS segments are served by
-the dedicated Jellyfin host, never by Vercel serverless functions.
+No Jellyfin dependency. Metadata and playback are separate:
+- StreamX is an optional metadata adapter, disabled until upstream terms are reviewed.
+- Hovod is an optional self-hosted video pipeline for content Streamivio is authorised to distribute.
 """
 from __future__ import annotations
 
+import json
 import os
-from typing import Any
+import re
+from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
-from fastapi import APIRouter, Header, HTTPException, Query
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, Query
 
 router = APIRouter(prefix="/media", tags=["Streamivio Media Engine"])
-TIMEOUT = httpx.Timeout(12.0, connect=5.0)
+ROOT = Path(__file__).resolve().parents[1]
+CATALOG_PATH = ROOT / "catalog.json"
+TIMEOUT = httpx.Timeout(10.0, connect=4.0)
+RIGHTS_STATUSES = {"licensed", "owned", "public_domain"}
+ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+PLAYBACK_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 
 
-def jellyfin_url() -> str:
-    value = os.getenv("JELLYFIN_URL", "").strip().rstrip("/")
+def _base_url(name: str) -> str:
+    value = os.getenv(name, "").strip().rstrip("/")
     if not value:
-        raise HTTPException(status_code=503, detail="Jellyfin server is not configured")
+        return ""
+    parsed = urlparse(value)
+    local_http = parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1"}
+    if parsed.scheme != "https" and not local_http:
+        return ""
+    if not parsed.hostname or parsed.username or parsed.password:
+        return ""
     return value
 
 
-def client_headers(token: str | None = None) -> dict[str, str]:
-    headers = {
-        "Accept": "application/json",
-        "X-Emby-Authorization": 'MediaBrowser Client="Streamivio", Device="Web", DeviceId="streamivio-web", Version="1.0.0"',
-    }
-    if token:
-        # Jellyfin accepts the user's session token in the MediaBrowser header.
-        headers["X-Emby-Token"] = token
-        headers["Authorization"] = f'MediaBrowser Token="{token}"'
-    return headers
+def _streamx_enabled() -> bool:
+    return bool(_base_url("STREAMX_API_BASE")) and os.getenv("STREAMX_UPSTREAM_TERMS_APPROVED", "").lower() == "true"
 
 
-async def jf(method: str, path: str, token: str | None = None, **kwargs: Any) -> Any:
-    url = f"{jellyfin_url()}{path}"
-    supplied_headers = kwargs.pop("headers", {})
-    headers = {**client_headers(token), **supplied_headers}
+def _read_catalog() -> list[dict]:
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
-            response = await client.request(method, url, headers=headers, **kwargs)
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Jellyfin connection failed: {type(exc).__name__}") from exc
-    if response.status_code == 401:
-        raise HTTPException(status_code=401, detail="Jellyfin authentication failed")
-    if response.status_code == 403:
-        raise HTTPException(status_code=403, detail="Jellyfin denied this operation")
-    if response.status_code == 404:
-        raise HTTPException(status_code=404, detail="Jellyfin item was not found")
-    if response.is_error:
-        raise HTTPException(status_code=502, detail=f"Jellyfin returned HTTP {response.status_code}")
-    if response.status_code == 204 or not response.content:
-        return {}
-    try:
-        return response.json()
-    except ValueError:
-        return {"text": response.text}
+        payload = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    rows = payload.get("titles", []) if isinstance(payload, dict) else payload
+    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
 
 
-class LoginRequest(BaseModel):
-    username: str = Field(min_length=1, max_length=120)
-    password: str = Field(min_length=1, max_length=512)
+def _find_title(title_id: str) -> dict | None:
+    return next((row for row in _read_catalog() if str(row.get("id", "")) == title_id), None)
 
 
-class PlaybackRequest(BaseModel):
-    device_id: str = Field(default="streamivio-web", min_length=3, max_length=128)
-    max_bitrate: int | None = Field(default=None, ge=250_000, le=80_000_000)
-    audio_stream_index: int | None = Field(default=None, ge=0)
-    subtitle_stream_index: int | None = Field(default=None, ge=-1)
+def _has_distribution_rights(row: dict) -> bool:
+    return (
+        row.get("distribution_authorized") is True
+        and str(row.get("rights_status", "")).lower() in RIGHTS_STATUSES
+        and isinstance(row.get("rights_reference"), str)
+        and bool(row["rights_reference"].strip())
+    )
 
 
-def require_token(authorization: str | None, x_emby_token: str | None) -> str:
-    token = x_emby_token
-    if not token and authorization:
-        # Accept a Jellyfin MediaBrowser token, never a Streamivio admin key.
-        marker = 'Token="'
-        if marker in authorization:
-            token = authorization.split(marker, 1)[1].split('"', 1)[0]
-        elif authorization.lower().startswith("bearer "):
-            token = authorization[7:].strip()
-    if not token or len(token) > 4096:
-        raise HTTPException(status_code=401, detail="Sign in to Streamivio to continue")
-    return token
-
-
-def auth_token(authorization: str | None, x_emby_token: str | None) -> str:
-    return require_token(authorization, x_emby_token)
+def _is_https_media_url(value: object, allowed_hosts: set[str]) -> bool:
+    if not isinstance(value, str) or len(value) > 4096:
+        return False
+    parsed = urlparse(value)
+    return (
+        parsed.scheme == "https"
+        and bool(parsed.hostname)
+        and parsed.hostname.lower() in allowed_hosts
+        and not parsed.username
+        and not parsed.password
+    )
 
 
 @router.get("/health")
 async def media_health():
-    configured = bool(os.getenv("JELLYFIN_URL", "").strip())
-    if not configured:
-        return {"service": "streamivio-media-engine", "status": "needs_configuration", "jellyfin": False}
-    try:
-        data = await jf("GET", "/System/Info/Public")
-        return {"service": "streamivio-media-engine", "status": "ok", "jellyfin": True, "server_name": data.get("ServerName")}
-    except HTTPException as exc:
-        return {"service": "streamivio-media-engine", "status": "unavailable", "jellyfin": False, "reason": exc.detail}
-
-
-@router.post("/auth/login")
-async def media_login(payload: LoginRequest):
-    data = await jf(
-        "POST",
-        "/Users/AuthenticateByName",
-        json={"Username": payload.username, "Pw": payload.password},
-        headers={"Content-Type": "application/json", **client_headers()},
-    )
-    user = data.get("User") or {}
-    token = data.get("AccessToken")
-    if not token or not user.get("Id"):
-        raise HTTPException(status_code=502, detail="Jellyfin did not return a valid user session")
+    streamx_configured = bool(_base_url("STREAMX_API_BASE"))
+    streamx_enabled = _streamx_enabled()
+    hovod_configured = bool(_base_url("HOVOD_API_URL") and os.getenv("HOVOD_ALLOWED_MEDIA_HOSTS", "").strip())
     return {
-        "access_token": token,
-        "token_type": "MediaBrowser",
-        "user": {"id": user.get("Id"), "name": user.get("Name")},
-        "server": data.get("ServerId"),
+        "service": "streamivio-media-engine",
+        "status": "ok",
+        "metadata": "enabled" if streamx_enabled else ("needs_terms_approval" if streamx_configured else "not_configured"),
+        "playback": "configured" if hovod_configured else "not_configured",
     }
-
-
-@router.get("/libraries")
-async def media_libraries(authorization: str | None = Header(default=None), x_emby_token: str | None = Header(default=None)):
-    token = auth_token(authorization, x_emby_token)
-    return await jf("GET", "/Library/VirtualFolders", token)
-
-
-@router.get("/items")
-async def media_items(
-    q: str | None = Query(default=None, max_length=150),
-    parent_id: str | None = None,
-    include_types: str | None = None,
-    limit: int = Query(default=40, ge=1, le=100),
-    start_index: int = Query(default=0, ge=0),
-    authorization: str | None = Header(default=None),
-    x_emby_token: str | None = Header(default=None),
-):
-    token = auth_token(authorization, x_emby_token)
-    user = await jf("GET", "/Users/Me", token)
-    params: dict[str, Any] = {
-        "UserId": user["Id"], "Recursive": "true", "StartIndex": start_index,
-        "Limit": limit, "Fields": "Overview,Genres,People,ProviderIds,MediaSources,DateCreated,PremiereDate,RunTimeTicks",
-        "ImageTypeLimit": 1, "EnableImageTypes": "Primary,Backdrop,Thumb",
-    }
-    if q:
-        params["SearchTerm"] = q
-    if parent_id:
-        params["ParentId"] = parent_id
-    if include_types:
-        params["IncludeItemTypes"] = include_types
-    return await jf("GET", f"/Users/{user['Id']}/Items", token, params=params)
-
-
-@router.get("/items/{item_id}")
-async def media_item(item_id: str, authorization: str | None = Header(default=None), x_emby_token: str | None = Header(default=None)):
-    token = auth_token(authorization, x_emby_token)
-    return await jf("GET", f"/Items/{item_id}", token, params={"Fields": "Overview,Genres,People,ProviderIds,MediaSources,DateCreated,PremiereDate,RunTimeTicks"})
-
-
-@router.post("/items/{item_id}/playback-info")
-async def playback_info(
-    item_id: str,
-    payload: PlaybackRequest,
-    authorization: str | None = Header(default=None),
-    x_emby_token: str | None = Header(default=None),
-):
-    token = auth_token(authorization, x_emby_token)
-    params: dict[str, Any] = {"UserId": (await jf("GET", "/Users/Me", token))["Id"], "EnableDirectPlay": "true", "EnableDirectStream": "true", "EnableTranscoding": "true", "AutoOpenLiveStream": "true", "DeviceId": payload.device_id}
-    if payload.max_bitrate:
-        params["MaxStreamingBitrate"] = payload.max_bitrate
-    if payload.audio_stream_index is not None:
-        params["AudioStreamIndex"] = payload.audio_stream_index
-    if payload.subtitle_stream_index is not None:
-        params["SubtitleStreamIndex"] = payload.subtitle_stream_index
-    result = await jf("GET", f"/Items/{item_id}/PlaybackInfo", token, params=params)
-    # Provide the server origin so the client can play the HLS/direct stream itself.
-    result["Streamivio"] = {
-        "server_url": jellyfin_url(),
-        "delivery": "Jellyfin direct play or adaptive HLS/transcoding",
-        "note": "The browser connects directly to the configured Jellyfin host for media bytes.",
-    }
-    return result
-
-
-@router.post("/sessions/{item_id}/progress")
-async def playback_progress(
-    item_id: str,
-    position_ticks: int = Query(ge=0),
-    is_paused: bool = False,
-    authorization: str | None = Header(default=None),
-    x_emby_token: str | None = Header(default=None),
-):
-    token = auth_token(authorization, x_emby_token)
-    return await jf("POST", f"/Sessions/Playing/Progress", token, params={"ItemId": item_id, "PositionTicks": position_ticks, "IsPaused": str(is_paused).lower()})
-
-
-@router.post("/sessions/{item_id}/stopped")
-async def playback_stopped(
-    item_id: str,
-    position_ticks: int = Query(ge=0),
-    authorization: str | None = Header(default=None),
-    x_emby_token: str | None = Header(default=None),
-):
-    token = auth_token(authorization, x_emby_token)
-    return await jf("POST", "/Sessions/Playing/Stopped", token, params={"ItemId": item_id, "PositionTicks": position_ticks})
-
-
-@router.get("/subtitles/languages")
-async def subtitle_languages():
-    return {"supported": ["en", "sw", "ja", "fr", "es", "de", "pt", "ar"], "formats": ["srt", "vtt", "ass", "ssa", "pgs", "vobsub"], "source": "embedded, sidecar, or configured authorised subtitle provider"}
-
-
-@router.get("/metadata/anilist")
-async def anilist_search(q: str = Query(min_length=2, max_length=100), page: int = Query(default=1, ge=1, le=100)):
-    query = """
-    query ($search: String, $page: Int) {
-      Page(page: $page, perPage: 20) {
-        media(search: $search, type: ANIME) {
-          id idMal format status episodes seasonYear averageScore description(asHtml: false)
-          title { romaji english native }
-          coverImage { extraLarge large }
-          genres
-        }
-      }
-    }
-    """
-    try:
-        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            response = await client.post("https://graphql.anilist.co", json={"query": query, "variables": {"search": q, "page": page}})
-            response.raise_for_status()
-            payload = response.json()
-    except (httpx.HTTPError, ValueError) as exc:
-        raise HTTPException(status_code=502, detail="AniList metadata provider is unavailable") from exc
-    return {"provider": "AniList", "results": payload.get("data", {}).get("Page", {}).get("media", [])}
 
 
 @router.get("/providers")
-async def provider_status():
-    configured = [name.strip() for name in os.getenv("STREAMIVIO_LICENSED_PROVIDERS", "").split(",") if name.strip()]
+async def media_providers():
     return {
-        "jellyfin": bool(os.getenv("JELLYFIN_URL", "").strip()),
-        "metadata": {"anilist": True, "imdb_suggestion": True, "omdb": bool(os.getenv("OMDB_API_KEY"))},
-        "licensed_external_providers": [{"id": name, "configured": True} for name in configured],
-        "external_provider_policy": "Only provider APIs and playback URLs supplied under a valid operator agreement are enabled.",
+        "providers": [
+            {
+                "id": "streamx",
+                "role": "metadata",
+                "configured": bool(_base_url("STREAMX_API_BASE")),
+                "enabled": _streamx_enabled(),
+                "status": "enabled" if _streamx_enabled() else "disabled_until_upstream_terms_are_reviewed",
+                "source": "https://github.com/imzyrix/streamx-api",
+                "code_license": "MIT",
+                "upstream_data_license": "varies_by_provider",
+            },
+            {
+                "id": "anilist",
+                "role": "anime_metadata",
+                "configured": bool(_base_url("STREAMX_API_BASE")),
+                "enabled": _streamx_enabled() and os.getenv("ANILIST_USAGE_APPROVED", "").lower() == "true",
+                "status": "enabled" if (_streamx_enabled() and os.getenv("ANILIST_USAGE_APPROVED", "").lower() == "true") else "disabled_until_anilist_terms_are_cleared",
+                "source": "https://docs.anilist.co/guide/terms-of-use",
+            },
+            {
+                "id": "hovod",
+                "role": "authorised_video_delivery",
+                "configured": bool(_base_url("HOVOD_API_URL") and os.getenv("HOVOD_ALLOWED_MEDIA_HOSTS", "").strip()),
+                "status": "configured" if (_base_url("HOVOD_API_URL") and os.getenv("HOVOD_ALLOWED_MEDIA_HOSTS", "").strip()) else "not_configured",
+                "source": "https://github.com/Synapsr/Hovod",
+                "code_license": "MIT",
+                "playback_access": "public_unlisted_ids",
+                "warning": "Hovod public playback IDs are unlisted, not access-controlled. Use only titles cleared for public playback; do not use this mode for subscriber-only content.",
+            },
+        ]
+    }
+
+
+@router.get("/search")
+async def media_search(
+    q: str = Query(min_length=2, max_length=100),
+    kind: str = Query(default="movie", pattern="^(movie|series|anime|documentary)$"),
+    limit: int = Query(default=30, ge=1, le=100),
+):
+    if _streamx_enabled() and kind != "documentary":
+        if kind == "anime" and os.getenv("ANILIST_USAGE_APPROVED", "").lower() != "true":
+            raise HTTPException(status_code=503, detail="AniList is disabled until its API terms and Streamivio's service model are cleared.")
+        base = _base_url("STREAMX_API_BASE")
+        upstream_type = "series" if kind in {"series", "anime", "documentary"} else "movie"
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
+                endpoint = f"{base}/anime/search" if kind == "anime" else f"{base}/search"
+                response = await client.get(
+                    endpoint,
+                    params={"q": q} if kind == "anime" else {"q": q, "type": upstream_type},
+                    headers={"Accept": "application/json"},
+                )
+                response.raise_for_status()
+                payload = response.json()
+            if isinstance(payload, dict):
+                payload["streamivio_metadata_provider"] = "streamx"
+                return payload
+            raise ValueError("Unexpected metadata response")
+        except (httpx.HTTPError, ValueError) as exc:
+            raise HTTPException(status_code=502, detail="Metadata provider is temporarily unavailable") from exc
+
+    query = q.casefold().strip()
+    kind_types = {
+        "movie": {"movie"},
+        "series": {"tv", "series"},
+        "anime": {"anime"},
+        "documentary": {"documentary"},
+    }[kind]
+    rows = [
+        row for row in _read_catalog()
+        if row.get("published", True)
+        and query in str(row.get("title", "")).casefold()
+        and str(row.get("type", "movie")).lower() in kind_types
+    ]
+    return {"results": rows[:limit], "total": len(rows), "provider": "streamivio-catalog", "metadata_only": True}
+
+
+@router.get("/meta/{kind}/{content_id}")
+async def media_metadata(kind: str, content_id: str):
+    if kind not in {"movie", "series"} or not ID_RE.fullmatch(content_id):
+        raise HTTPException(status_code=400, detail="Invalid metadata type or identifier")
+    if not _streamx_enabled():
+        raise HTTPException(status_code=503, detail="StreamX metadata is disabled until its upstream data terms have been reviewed and approved.")
+    base = _base_url("STREAMX_API_BASE")
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
+            response = await client.get(f"{base}/meta/{kind}/{content_id}", params={"enrich": "0"}, headers={"Accept": "application/json"})
+            response.raise_for_status()
+            return response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="Metadata provider is temporarily unavailable") from exc
+
+
+@router.get("/playback/{title_id}")
+async def media_playback(title_id: str):
+    if not ID_RE.fullmatch(title_id):
+        raise HTTPException(status_code=400, detail="Invalid title identifier")
+    row = _find_title(title_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Title not found")
+    if not _has_distribution_rights(row):
+        raise HTTPException(status_code=403, detail="Playback is disabled: this title has no verified distribution-rights record.")
+
+    playback = row.get("playback") if isinstance(row.get("playback"), dict) else {}
+    playback_id = str(playback.get("hovod_playback_id") or "")
+    if not PLAYBACK_ID_RE.fullmatch(playback_id):
+        raise HTTPException(status_code=404, detail="No Hovod asset is mapped to this authorised title.")
+
+    base = _base_url("HOVOD_API_URL")
+    if not base:
+        raise HTTPException(status_code=503, detail="Hovod API is not configured.")
+    allowed_hosts = {
+        value.strip().lower()
+        for value in os.getenv("HOVOD_ALLOWED_MEDIA_HOSTS", "").split(",")
+        if value.strip()
+    }
+    api_host = (urlparse(base).hostname or "").lower()
+    if not allowed_hosts:
+        raise HTTPException(status_code=503, detail="Configure HOVOD_ALLOWED_MEDIA_HOSTS with the trusted Hovod/CDN hostnames.")
+
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
+            response = await client.get(f"{base}/v1/playback/{playback_id}", headers={"Accept": "application/json"})
+            response.raise_for_status()
+            payload = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="Hovod playback service is unavailable") from exc
+
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=502, detail="Hovod returned an invalid playback response.")
+
+    manifest = data.get("manifestUrl")
+    player = data.get("playerUrl")
+    if manifest and not _is_https_media_url(manifest, allowed_hosts):
+        raise HTTPException(status_code=502, detail="Hovod returned a media URL outside the configured trusted host allowlist.")
+    if player:
+        parsed_player = urlparse(player) if isinstance(player, str) else None
+        if not parsed_player or parsed_player.scheme != "https" or (parsed_player.hostname or "").lower() != api_host:
+            player = None
+
+    if not manifest and not player:
+        raise HTTPException(status_code=409, detail="This Hovod asset is not ready for playback.")
+
+    return {
+        "available": True,
+        "format": "hls" if manifest else "embed",
+        "stream_url": manifest,
+        "player_url": player,
+        "title": row.get("title"),
+        "source": "hovod",
+        "rights_status": row.get("rights_status"),
+        "notice": "Playback is enabled only for catalogue entries with an explicit distribution-rights record.",
     }

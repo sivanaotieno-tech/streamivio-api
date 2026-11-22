@@ -1,78 +1,102 @@
-# Streamivio Media Engine — setup
+# Streamivio Media Engine — standalone, hybrid deployment
 
-The Streamivio API is the control plane. Jellyfin is the dedicated media server and delivers video, audio, subtitles, and HLS segments. Do not run FFmpeg or store media files in Vercel Functions: serverless functions are not a media server.
+Streamivio does not require Jellyfin. The web application and metadata/control API can run on Vercel; the persistent video pipeline runs on a small cloud VM and stores authorised media in S3-compatible object storage (Cloudflare R2 is one option).
 
-## 1. Start a new Jellyfin server
+## Components
 
-Requirements:
-- A Windows, Linux, or NAS host that can stay online while users watch.
-- Enough disk space for media you own or are authorised to stream.
-- Docker Desktop (Windows) or Docker Engine (Linux).
-- A stable LAN address; for remote viewing, a properly secured public hostname or VPN.
+- **Streamivio web app:** Next.js on Vercel.
+- **Streamivio API:** FastAPI on Vercel. It exposes metadata and playback coordination, not video bytes.
+- **StreamX API:** optional metadata adapter. Its source code is MIT, but its upstream providers have different terms. Keep it disabled until the operator has reviewed and approved the exact upstream sources for the intended use.
+- **Hovod:** self-hosted video upload/transcoding/player service on a persistent VM. Its source code is MIT.
+- **Object storage:** S3-compatible bucket for originals, HLS renditions, thumbnails and captions. Do not store large media in the Git repository or Vercel filesystem.
 
-From the repository root:
+## 1. Hovod hybrid host
 
-```powershell
-mkdir media-server\config, media-server\cache, media-server\media
-docker compose -f media-server/docker-compose.yml up -d
+Use a Linux VM with Docker and enough CPU/RAM for the expected number of simultaneous transcodes. Hovod's worker needs temporary disk space during encoding (the upstream guide recommends planning for roughly 3× the source size). Keep its API behind HTTPS reverse proxy; the Compose file binds port 3000 to loopback.
+
+1. Create an S3-compatible bucket and a dedicated access key limited to that bucket.
+2. Copy `.env.hovod.example` to `.env.hovod`.
+3. Set the R2/S3 endpoint, bucket, access keys, public media base URL, public application URL, CORS origin and a unique JWT secret.
+4. Set `EMBED_FRAME_ANCESTORS` to the Streamivio origin so the player can be embedded.
+5. Run `docker compose -f media-engine/docker-compose.yml up -d`.
+6. Configure a reverse proxy with TLS and expose the Hovod API/dashboard at the hostname you choose.
+
+Do not expose the container port directly to the public internet. Restrict dashboard/admin access at the reverse proxy or network layer.
+
+## 2. Streamivio API environment
+
+Set these server-side variables in the API deployment:
+
+- `HOVOD_API_URL`: HTTPS origin of the Hovod service, e.g. `https://media-api.example.com`.
+- `HOVOD_ALLOWED_MEDIA_HOSTS`: comma-separated hostnames allowed for HLS manifests, e.g. `media-api.example.com,media-assets.example.com`. Hostnames only; no schemes or paths.
+- `STREAMX_API_BASE`: your self-hosted StreamX API origin. Leave unset until deployed.
+- `STREAMX_UPSTREAM_TERMS_APPROVED`: set to `true` only after reviewing the Cinemeta/MetaHub upstream terms and rights for the intended use. The default is disabled.
+- `ANILIST_USAGE_APPROVED`: separate opt-in for AniList anime search. Keep false unless the AniList API terms and Streamivio's service model have been cleared.
+- `IMDB_LOOKUP_APPROVED`: controls the existing IMDb suggestion ID lookup route. Keep false unless IMDb has approved the intended use.
+
+The frontend playback route also reads `STREAMIVIO_API_URL` (or `NEXT_PUBLIC_STREAMIVIO_API_URL`) to call the Streamivio API. Prefer the server-only `STREAMIVIO_API_URL` variable.
+
+## 3. Rights-controlled catalogue entries
+
+Hovod public playback IDs are unlisted, not access-controlled. This integration is therefore restricted to titles cleared for public playback. It is not suitable for subscriber-only/private titles until an authenticated playback gateway is implemented.
+
+A title must explicitly carry all of the following in `catalog.json`:
+
+```json
+{
+  "id": "public-domain-sample",
+  "title": "Example authorised title",
+  "distribution_authorized": true,
+  "rights_status": "public_domain",
+  "rights_reference": "https://example.org/rights-record",
+  "playback": {
+    "hovod_playback_id": "replace-with-real-hovod-playback-id"
+  }
+}
 ```
 
-Open `http://localhost:8096` and complete the Jellyfin first-run wizard. Create an administrator, then add libraries pointing at `/media` (Movies, Shows, Anime, Documentaries, etc.). The compose file mounts media read-only to prevent accidental edits/deletions from Jellyfin. To avoid filling your system drive, set `STREAMIVIO_MEDIA_PATH` in a root-level `.env` file to an existing external-drive or NAS folder (for example `STREAMIVIO_MEDIA_PATH=E:/Media` on Windows), then start Compose again. No media needs to be copied into the repository.
+Allowed `rights_status` values are `licensed`, `owned`, and `public_domain`. `rights_reference` must point to the underlying contract, licence, ownership record or public-domain evidence. Do not set these fields merely to make a title playable.
 
-On Windows Docker Desktop, the example `user: "1000:1000"` may not match your file permissions. If the container cannot read your media, remove the `user` line and restart the container. Do not expose port 8096 directly to the public internet; use HTTPS through a reverse proxy or a private VPN.
+The Hovod playback route verifies the rights fields before asking Hovod for the public playback manifest. The returned manifest hostname must also be listed in `HOVOD_ALLOWED_MEDIA_HOSTS`.
 
-## 2. Configure the Streamivio API
+## 4. Metadata provider terms
 
-Copy `.env.example` values into the API deployment environment (Vercel → Project → Settings → Environment Variables):
+StreamX code is MIT-licensed; its data is not one blanket licence. Its README lists Cinemeta, MetaHub, Wikidata, Wikipedia, IMDb suggestion data, Rotten Tomatoes, Metacritic, JustWatch, TVmaze and AniList. Some are community endpoints, some are public/open-data sources, and some are parsed public web pages rather than official commercial APIs. Posters and artwork remain owned by their respective rights holders.
 
-- `JELLYFIN_URL`: the reachable HTTPS URL of your Jellyfin host, e.g. `https://media.example.com`. It must be reachable from both the API host and the user's browser.
-- `STREAMIVIO_ALLOWED_ORIGINS`: the exact Streamivio website origin(s), comma-separated.
-- `STREAMIVIO_LICENSED_PROVIDERS`: optional IDs for provider adapters that have an approved API/integration agreement. This is a status/configuration list, not an automatic connection.
-- `OMDB_API_KEY`: optional metadata key.
+For production or commercial use:
+- Review each upstream's current terms and obtain permission where required.
+- Keep attribution and source provenance where required.
+- Do not assume a public endpoint, no-key endpoint, or MIT code licence grants redistribution rights.
+- Disable upstreams whose terms do not clearly permit your use. Replace those adapters with licensed data feeds if necessary.
 
-Redeploy the API after setting environment variables. Check `GET /media/health` and `GET /media/providers`.
+The StreamX adapter is intentionally disabled unless `STREAMX_UPSTREAM_TERMS_APPROVED=true` is explicitly set.
 
-## 3. Streamivio frontend integration
+## 5. Hovod playback limitations
 
-API base URL is your deployed Streamivio API origin. The frontend flow:
+Hovod's current public playback endpoint allows anyone with the unlisted playback ID to watch. Do not put confidential or subscriber-only content there. The Streamivio adapter only enables public playback for catalogue items with a rights record, but that is a rights check, not user-level access control.
 
-1. Sign in with `POST /media/auth/login` using the user's Jellyfin credentials. Store the returned user access token in memory/session storage only; never commit it or put it in analytics/logs.
-2. Send `Authorization: MediaBrowser Token="<access_token>"` (or `X-Emby-Token`) on calls to `/media/libraries`, `/media/items`, `/media/items/{id}`, and `/media/items/{id}/playback-info`.
-3. Render the returned `MediaSources` and `MediaStreams`: let the player choose direct play when supported, otherwise use Jellyfin's returned transcoding/HLS information. The response also includes the user's Jellyfin session token for authenticated browser media requests; treat it as a password and keep it out of logs/analytics.
-4. Display selectable audio/subtitle streams from `MediaStreams`. Text subtitle formats can be rendered as sidecar tracks when supported; image subtitles or incompatible codecs may require server-side burn-in transcoding.
-5. Send progress to `/media/sessions/{id}/progress` periodically and `/stopped` when playback ends.
+Hovod provides its own embeddable player URL (including captions and quality controls) and HLS manifest URL. Streamivio prefers the Hovod player when available; the manifest is used as a fallback.
 
-The Jellyfin host must allow browser requests from the Streamivio origin (CORS) and be served over HTTPS when Streamivio is HTTPS. The API does not relay video bytes: direct media delivery avoids serverless response-size/time limits and reduces bandwidth costs.
+## 6. Local checks
 
-## 4. Metadata coverage
+API:
+```powershell
+python -m venv .venv
+.venv\\Scripts\\activate
+pip install -r requirements.txt
+uvicorn api.index:app --reload
+# Open http://127.0.0.1:8000/docs
+```
 
-- Jellyfin's library scanner provides local item metadata and media stream details.
-- `GET /media/metadata/anilist?q=...` adds anime catalogue metadata from AniList.
-- Existing Streamivio API IMDb suggestion resolution and optional OMDb enrichment remain separate metadata sources.
-- Add provider-specific adapters only for documented APIs and keys you are authorised to use. Never scrape protected services or guess playback URLs.
-
-## 5. External streaming providers
-
-The initial release includes a provider registry/status contract, not turnkey subscriptions to every streaming service. Each provider requires a documented API, valid credentials, permitted playback method, and a provider-specific adapter. Only playback sources that Streamivio or its users are authorised to access may be surfaced. DRM-protected services must use their official playback SDK/client; this engine does not bypass DRM.
-
-## 6. Playback and transcoding
-
-Jellyfin handles direct play, remuxing, and FFmpeg transcoding. Performance depends on CPU/GPU, source codec, selected quality, subtitle type, and concurrent users. Subtitle burn-in can be substantially more demanding than direct-play subtitles. Start with one test title and verify browser playback before inviting users.
-
-## API endpoints
-
+Check:
 - `GET /media/health`
 - `GET /media/providers`
-- `POST /media/auth/login`
-- `GET /media/libraries`
-- `GET /media/items?q=...`
-- `GET /media/items/{item_id}`
-- `POST /media/items/{item_id}/playback-info`
-- `POST /media/sessions/{item_id}/progress?position_ticks=...`
-- `POST /media/sessions/{item_id}/stopped?position_ticks=...`
-- `GET /media/subtitles/languages`
-- `GET /media/metadata/anilist?q=...`
+- `GET /media/search?q=planet&kind=documentary`
+- `GET /media/playback/{catalog-id}` (must return 403 unless a valid rights record and Hovod mapping exist)
 
-## Current deployment boundary
+Hovod:
+```powershell
+docker compose -f media-engine/docker-compose.yml config
+```
 
-The FastAPI control plane can deploy to Vercel. The Jellyfin server, media storage, FFmpeg transcoding, and media delivery must run on a persistent host (your own PC/NAS or a dedicated server). Vercel deployment alone does not create a working media server.
+A successful API health response does not prove a video can play. Test one authorised sample asset end-to-end in a real browser, including captions, CORS, CDN access and playback on mobile networks before production.

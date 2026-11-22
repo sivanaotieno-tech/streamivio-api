@@ -25,7 +25,7 @@ origins = [
     item.strip().rstrip("/")
     for item in os.getenv(
         "STREAMIVIO_ALLOWED_ORIGINS",
-        "https://streamivio.vercel.app,https://streamflix-zfep-sivanaotieno-techs-projects.vercel.app",
+        "https://streamivio.vercel.app",
     ).split(",")
     if item.strip()
 ]
@@ -79,7 +79,13 @@ def normalize_title(item: dict[str, Any]) -> dict[str, Any]:
         "keywords": item.get("keywords") or item.get("tags") or [],
         "cast": item.get("cast") or item.get("actors") or [],
         "directors": item.get("directors") or [],
-        "playback_available": bool(item.get("video_url")),
+        "playback_available": bool(
+            item.get("distribution_authorized") is True
+            and str(item.get("rights_status", "")).lower() in {"licensed", "owned", "public_domain"}
+            and isinstance(item.get("rights_reference"), str)
+            and item.get("rights_reference", "").strip()
+            and (item.get("video_url") or playback.get("hovod_playback_id"))
+        ),
         "category": item.get("category"),
         "imdb_id": item.get("imdb_id"),
         "tmdb_id": item.get("tmdb_id"),
@@ -261,6 +267,8 @@ async def playback_endpoint(title_id: str):
         raise HTTPException(status_code=404, detail="Title not found")
     if row.get("imdb_id") or row.get("tmdb_id"):
         return {"resolved": True, "available": False, "imdb_id": row.get("imdb_id"), "tmdb_id": row.get("tmdb_id"), "title": row["title"]}
+    if os.getenv("IMDB_LOOKUP_APPROVED", "").lower() != "true":
+        raise HTTPException(status_code=503, detail="IMDb suggestion lookup is disabled until its terms and use are approved.")
     resolved = await resolve_imdb_id(row["title"], str(row.get("year") or "") or None, row["type"])
     if not resolved:
         raise HTTPException(status_code=404, detail="No exact IMDb match found; add a verified imdb_id or tmdb_id to the catalog.")
@@ -286,5 +294,5 @@ async def genres_endpoint():
     return {"results": sorted({genre for row in get_catalog() for genre in row.get("genres", [])})}
 
 
-# Streamivio Media Engine routes (control plane; video delivery stays on Jellyfin).
+# Standalone Streamivio Media Engine routes (metadata and playback coordination only).
 app.include_router(media_engine_router)
