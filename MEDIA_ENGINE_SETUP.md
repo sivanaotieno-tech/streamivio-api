@@ -14,7 +14,7 @@ Streamivio does not require Jellyfin. The web application and metadata/control A
 
 Use a Linux VM with Docker and enough CPU/RAM for the expected number of simultaneous transcodes. Hovod's worker needs temporary disk space during encoding (the upstream guide recommends planning for roughly 3× the source size). Keep its API behind HTTPS reverse proxy; the Compose file binds port 3000 to loopback.
 
-1. Create an S3-compatible bucket and a dedicated access key limited to that bucket.
+1. Create an S3-compatible bucket and a dedicated access key limited to that bucket. For Cloudflare R2, use path-style addressing and set `S3_PUBLIC_ACL=false`. Configure public read only for Hovod's `playback/` object prefix through the bucket policy/custom domain; keep original `sources/` objects private.
 2. Copy `.env.hovod.example` to `.env.hovod`.
 3. Set the R2/S3 endpoint, bucket, access keys, public media base URL, public application URL, CORS origin and a unique JWT secret.
 4. Set `EMBED_FRAME_ANCESTORS` to the Streamivio origin so the player can be embedded.
