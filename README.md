@@ -46,7 +46,7 @@ The StreamX metadata adapter requires both `STREAMX_API_BASE` and `STREAMX_UPSTR
 
 The Hovod adapter requires `HOVOD_API_URL` and `HOVOD_ALLOWED_MEDIA_HOSTS`. Hovod playback IDs are public/unlisted, not access-controlled. This integration is only for content cleared for public playback; it is not suitable for subscriber-only/private content.
 
-See [MEDIA_ENGINE_SETUP.md](MEDIA_ENGINE_SETUP.md) and [media-engine/.env.hovod.example](media-engine/.env.hovod.example).
+See [MEDIA_ENGINE_SETUP.md](MEDIA_ENGINE_SETUP.md), [PROVIDER_AUDIT.md](PROVIDER_AUDIT.md) and [media-engine/.env.hovod.example](media-engine/.env.hovod.example).
 
 ## Rights-controlled catalogue records
 
