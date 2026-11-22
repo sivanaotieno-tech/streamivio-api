@@ -6,3 +6,4 @@ venv/
 .env.*
 !.env.example
 .pytest_cache/
+\n# Local Hovod secrets (never commit)\n/media-engine/.env.hovod\n
