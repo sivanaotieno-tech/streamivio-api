@@ -47,11 +47,15 @@ class StreamivioMediaEngineTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual([row["id"] for row in response.json()["results"]], ["doc-1"])
 
-    def test_anilist_is_not_enabled_by_default(self):
+    def test_anilist_is_not_enabled_without_explicit_approval(self):
         self.write_catalog([])
-        response = self.client.get("/media/search?q=one+piece&kind=anime")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["provider"], "streamivio-catalog")
+        with patch.dict("os.environ", {
+            "STREAMX_API_BASE": "https://metadata.example.org",
+            "STREAMX_UPSTREAM_TERMS_APPROVED": "true",
+            "ANILIST_USAGE_APPROVED": "false",
+        }):
+            response = self.client.get("/media/search?q=one+piece&kind=anime")
+        self.assertEqual(response.status_code, 503)
 
     def test_playback_requires_rights_record(self):
         self.write_catalog([{"id": "sample", "title": "Sample", "playback": {"hovod_playback_id": "Abcdefgh1234"}}])
