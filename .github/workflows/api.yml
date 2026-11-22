@@ -24,3 +24,7 @@ jobs:
         run: python -m compileall -q api
       - name: Run API tests
         run: python -m unittest discover -s tests -v
+      - name: Validate Hovod Docker Compose configuration
+        run: |
+          cp media-engine/.env.hovod.example media-engine/.env.hovod
+          docker compose -f media-engine/docker-compose.yml config --quiet
