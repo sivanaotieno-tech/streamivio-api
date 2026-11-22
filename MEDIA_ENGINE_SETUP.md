@@ -32,6 +32,7 @@ Set these server-side variables in the API deployment:
 - `STREAMX_API_BASE`: your self-hosted StreamX API origin. Leave unset until deployed.
 - `STREAMX_UPSTREAM_TERMS_APPROVED`: set to `true` only after reviewing the Cinemeta/MetaHub upstream terms and rights for the intended use. The default is disabled.
 - `ANILIST_USAGE_APPROVED`: separate opt-in for AniList anime search. Keep false unless the AniList API terms and Streamivio's service model have been cleared.
+- `IMDB_LOOKUP_APPROVED`: controls the existing IMDb suggestion ID lookup route. Keep false unless IMDb has approved the intended use.
 
 The frontend playback route also reads `STREAMIVIO_API_URL` (or `NEXT_PUBLIC_STREAMIVIO_API_URL`) to call the Streamivio API. Prefer the server-only `STREAMIVIO_API_URL` variable.
 
