@@ -25,7 +25,7 @@ origins = [
     item.strip().rstrip("/")
     for item in os.getenv(
         "STREAMIVIO_ALLOWED_ORIGINS",
-        "https://streamivio.vercel.app,https://streamflix-zfep-sivanaotieno-techs-projects.vercel.app",
+        "https://streamivio.vercel.app",
     ).split(",")
     if item.strip()
 ]
@@ -79,7 +79,13 @@ def normalize_title(item: dict[str, Any]) -> dict[str, Any]:
         "keywords": item.get("keywords") or item.get("tags") or [],
         "cast": item.get("cast") or item.get("actors") or [],
         "directors": item.get("directors") or [],
-        "playback_available": bool(item.get("video_url")),
+        "playback_available": bool(
+            item.get("distribution_authorized") is True
+            and str(item.get("rights_status", "")).lower() in {"licensed", "owned", "public_domain"}
+            and isinstance(item.get("rights_reference"), str)
+            and item.get("rights_reference", "").strip()
+            and (item.get("video_url") or playback.get("hovod_playback_id"))
+        ),
         "category": item.get("category"),
         "imdb_id": item.get("imdb_id"),
         "tmdb_id": item.get("tmdb_id"),
