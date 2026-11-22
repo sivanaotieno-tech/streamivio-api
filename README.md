@@ -51,3 +51,12 @@ Never commit API keys. Configure them in Vercel Project Settings → Environment
 ## Deploy to Vercel
 
 Import this GitHub repository as a separate Vercel project. Select **FastAPI** if prompted; Vercel should detect the Python FastAPI application. The `vercel.json` rewrite routes requests to `api/index.py`.
+
+
+## Streamivio Media Engine
+
+The `/media/*` routes provide the control plane for a dedicated Jellyfin server. They cover Jellyfin authentication, library browsing, playback-info negotiation, progress reporting, subtitle-language capabilities, and AniList anime metadata search.
+
+See [MEDIA_ENGINE_SETUP.md](MEDIA_ENGINE_SETUP.md) for Docker Compose, Vercel environment variables, browser integration, HTTPS/CORS, and external-drive setup. Jellyfin and FFmpeg must run on a persistent host; Vercel serves the FastAPI control plane only and does not proxy video bytes.
+
+External provider status is exposed at `GET /media/providers`. A provider is not activated merely by listing its ID: each needs a documented official API, valid credentials, and permission to use its playback method.
