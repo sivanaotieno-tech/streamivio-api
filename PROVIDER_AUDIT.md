@@ -21,7 +21,7 @@ The Streamivio adapter currently calls only:
 - `/meta/{type}/{id}?enrich=0` for base title metadata/artwork (Cinemeta/MetaHub layer; optional enrichments are disabled).
 - `/anime/search` only when `ANILIST_USAGE_APPROVED=true`.
 
-It does **not** call StreamX's `/streaming` route, JustWatch offers, IMDb suggestion search, Rotten Tomatoes, Metacritic, TVmaze, Wikidata or Wikipedia enrichment. Those are not enabled through this adapter.
+It does **not** call StreamX's `/streaming` route, JustWatch offers, IMDb suggestion search, Rotten Tomatoes, Metacritic, TVmaze, Wikidata or Wikipedia enrichment. Those are not enabled through this adapter. The separate legacy API endpoint `GET /playback/{id}` can attempt IMDb suggestion lookup for catalogue rows missing an external ID; that operation is now independently disabled unless `IMDB_LOOKUP_APPROVED=true`.
 
 ### Upstream findings relevant to this integration
 
@@ -57,7 +57,7 @@ Hovod's Dockerfile installs the Debian `ffmpeg` package. FFmpeg's official legal
 
 1. Obtain written clearance for Cinemeta/MetaHub data and artwork or replace them with licensed feeds.
 2. Obtain AniList clearance or leave its adapter disabled.
-3. Do not use JustWatch, IMDb scraping, RT/Metacritic scraping or other non-cleared sources in a commercial Streamivio catalogue.
+3. Keep `IMDB_LOOKUP_APPROVED=false` unless IMDb has approved the intended use. Do not use JustWatch, IMDb scraping, RT/Metacritic scraping or other non-cleared sources in a commercial Streamivio catalogue.
 4. Confirm Hovod's public playback model is suitable for each title; do not use it for paywalled/private playback.
 5. Inspect FFmpeg's actual build configuration and dependency notices in the deployed Hovod image.
 6. Confirm the media licence covers the territories, term, monetisation, devices, subtitles, audio tracks and CDN delivery Streamivio intends to offer.
